@@ -47,34 +47,67 @@ pub(crate) fn rescale<C: Channel>(sample: u16, max_in: u32) -> C {
 }
 
 /// Converts scanlines of one image to RGBA, reusing its sample buffer.
-pub(crate) struct RowConverter<'a> {
+///
+/// At depths of 8 bits and below there are at most 256 possible sample
+/// values, so the rescaling is done once into a table and looked up
+/// afterwards rather than divided out per sample.
+pub(crate) struct RowConverter<'a, C> {
     color_type: ColorType,
     bit_depth: u8,
     max_in: u32,
     palette: &'a [[u8; 3]],
     transparency: Option<&'a Transparency>,
     samples: Vec<u16>,
+    /// Every sample value at this bit depth, rescaled. Empty at 16 bits,
+    /// where a table would need 65536 entries to save one division.
+    sample_lut: Vec<C>,
+    /// Every byte value rescaled, for palette entries and their alpha,
+    /// which are 8-bit whatever the image's depth is.
+    byte_lut: Vec<C>,
 }
 
-impl<'a> RowConverter<'a> {
+impl<'a, C: Channel> RowConverter<'a, C> {
     pub(crate) fn new(
         header: &Header,
         palette: Option<&'a [[u8; 3]]>,
         transparency: Option<&'a Transparency>,
     ) -> Self {
+        let max_in = (1u32 << header.bit_depth) - 1;
         RowConverter {
             color_type: header.color_type,
             bit_depth: header.bit_depth,
-            max_in: (1u32 << header.bit_depth) - 1,
+            max_in,
             palette: palette.unwrap_or(&[]),
             transparency,
             samples: Vec::new(),
+            sample_lut: if header.bit_depth <= 8 {
+                (0..=max_in as u16).map(|s| rescale(s, max_in)).collect()
+            } else {
+                Vec::new()
+            },
+            byte_lut: (0..=255).map(|b| rescale(b, 255)).collect(),
         }
+    }
+
+    /// One stored sample, rescaled to the output depth.
+    #[inline]
+    fn scale(&self, sample: u16) -> C {
+        match self.sample_lut.get(usize::from(sample)) {
+            Some(&value) => value,
+            // 16-bit samples: too many to tabulate.
+            None => rescale(sample, self.max_in),
+        }
+    }
+
+    /// One 8-bit value from a palette, rescaled to the output depth.
+    #[inline]
+    fn scale_byte(&self, byte: u8) -> C {
+        self.byte_lut[usize::from(byte)]
     }
 
     /// Converts one unfiltered scanline of `width` pixels, handing each
     /// pixel to `put(index_in_row, rgba)`.
-    pub(crate) fn convert<C: Channel>(
+    pub(crate) fn convert(
         &mut self,
         row: &[u8],
         width: usize,
@@ -82,7 +115,6 @@ impl<'a> RowConverter<'a> {
     ) -> Result<(), Error> {
         let channels = self.color_type.channels();
         read_samples(row, self.bit_depth, width * channels, &mut self.samples);
-        let max = self.max_in;
         let opaque = C::from_u32(C::MAX);
         let clear = C::from_u32(0);
         let s = &self.samples;
@@ -93,7 +125,7 @@ impl<'a> RowConverter<'a> {
                     _ => None,
                 };
                 for (i, &g) in s.iter().enumerate() {
-                    let v = rescale(g, max);
+                    let v = self.scale(g);
                     let a = if key == Some(g) { clear } else { opaque };
                     put(i, [v, v, v, a]);
                 }
@@ -111,12 +143,7 @@ impl<'a> RowConverter<'a> {
                     };
                     put(
                         i,
-                        [
-                            rescale(px[0], max),
-                            rescale(px[1], max),
-                            rescale(px[2], max),
-                            a,
-                        ],
+                        [self.scale(px[0]), self.scale(px[1]), self.scale(px[2]), a],
                     );
                 }
             }
@@ -138,18 +165,18 @@ impl<'a> RowConverter<'a> {
                     put(
                         i,
                         [
-                            rescale(r.into(), 255),
-                            rescale(g.into(), 255),
-                            rescale(b.into(), 255),
-                            rescale(a.into(), 255),
+                            self.scale_byte(r),
+                            self.scale_byte(g),
+                            self.scale_byte(b),
+                            self.scale_byte(a),
                         ],
                     );
                 }
             }
             ColorType::GrayscaleAlpha => {
                 for (i, px) in s.chunks_exact(2).enumerate() {
-                    let v = rescale(px[0], max);
-                    put(i, [v, v, v, rescale(px[1], max)]);
+                    let v = self.scale(px[0]);
+                    put(i, [v, v, v, self.scale(px[1])]);
                 }
             }
             ColorType::Rgba => {
@@ -157,10 +184,10 @@ impl<'a> RowConverter<'a> {
                     put(
                         i,
                         [
-                            rescale(px[0], max),
-                            rescale(px[1], max),
-                            rescale(px[2], max),
-                            rescale(px[3], max),
+                            self.scale(px[0]),
+                            self.scale(px[1]),
+                            self.scale(px[2]),
+                            self.scale(px[3]),
                         ],
                     );
                 }
@@ -214,6 +241,33 @@ mod tests {
         assert_eq!(rescale::<u8>(0x00FF, 65535), 1);
     }
 
+    #[test]
+    fn the_lookup_tables_agree_with_the_formula() {
+        // The tables are an optimisation; rescale is the definition.
+        for &color_type in &[ColorType::Grayscale, ColorType::Indexed, ColorType::Rgba] {
+            for &bit_depth in color_type.allowed_bit_depths() {
+                let h = header(color_type, bit_depth);
+                let to8: RowConverter<'_, u8> = RowConverter::new(&h, None, None);
+                let to16: RowConverter<'_, u16> = RowConverter::new(&h, None, None);
+                let max = (1u32 << bit_depth) - 1;
+                for sample in 0..=max as u16 {
+                    assert_eq!(to8.scale(sample), rescale::<u8>(sample, max));
+                    assert_eq!(to16.scale(sample), rescale::<u16>(sample, max));
+                }
+                // 16-bit samples fall through to the formula instead.
+                if bit_depth == 16 {
+                    assert!(to8.sample_lut.is_empty());
+                    assert_eq!(to8.scale(65535), 255);
+                    assert_eq!(to8.scale(0x00FF), 1);
+                }
+                for byte in 0..=255u8 {
+                    assert_eq!(to8.scale_byte(byte), byte);
+                    assert_eq!(to16.scale_byte(byte), u16::from(byte) * 257);
+                }
+            }
+        }
+    }
+
     fn header(color_type: ColorType, bit_depth: u8) -> Header {
         Header {
             width: 1,
@@ -232,7 +286,7 @@ mod tests {
         width: usize,
     ) -> Result<Vec<[C; 4]>, Error> {
         let mut out = vec![[C::default(); 4]; width];
-        RowConverter::new(&header, palette, trns).convert(row, width, |i, px| out[i] = px)?;
+        RowConverter::<C>::new(&header, palette, trns).convert(row, width, |i, px| out[i] = px)?;
         Ok(out)
     }
 
