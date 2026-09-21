@@ -1,0 +1,24 @@
+[package]
+name = "paeth"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+authors = ["Walter Marshall <elatclash@gmail.com>"]
+description = "A strict PNG decoder written from the specification and checked against every image in PngSuite."
+license = "MIT"
+repository = "https://github.com/ElatDev/paeth"
+readme = "README.md"
+keywords = ["png", "decoder", "image", "pngsuite", "parser"]
+categories = ["multimedia::images", "parser-implementations", "command-line-utilities"]
+exclude = ["/docs", "/tools", "/.github", "/.vscode"]
+
+[dependencies]
+flate2 = "1"
+
+[[bin]]
+name = "paeth"
+path = "src/main.rs"
+
+[profile.test]
+# The mutation tests decode tens of thousands of files; unoptimized they crawl.
+opt-level = 1

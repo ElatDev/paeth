@@ -1,0 +1,20 @@
+{
+  // Lint on save with the same command CI runs.
+  "rust-analyzer.check.command": "clippy",
+  "rust-analyzer.check.extraArgs": ["--all-targets"],
+  // Keep rust-analyzer out of the target directory cargo is using, so
+  // the two do not wait on each other's lock.
+  "rust-analyzer.cargo.targetDir": true,
+  "[rust]": {
+    "editor.defaultFormatter": "rust-lang.rust-analyzer",
+    "editor.formatOnSave": true
+  },
+  "files.watcherExclude": {
+    "**/target/**": true
+  },
+  "search.exclude": {
+    "**/target": true
+  },
+  "files.insertFinalNewline": true,
+  "files.trimTrailingWhitespace": true
+}

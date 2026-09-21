@@ -1,0 +1,59 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "cargo test",
+      "type": "cargo",
+      "command": "test",
+      "problemMatcher": ["$rustc"],
+      "group": { "kind": "test", "isDefault": true }
+    },
+    {
+      "label": "PngSuite conformance",
+      "type": "cargo",
+      "command": "test",
+      "args": ["--test", "pngsuite", "--", "--nocapture"],
+      "problemMatcher": ["$rustc"]
+    },
+    {
+      "label": "soak: 1.5M mutated files",
+      "type": "shell",
+      "command": "cargo test --release --test robustness -- --nocapture",
+      "options": { "env": { "PAETH_MUTATIONS": "1500" } },
+      "problemMatcher": ["$rustc"]
+    },
+    {
+      "label": "clippy (as CI runs it)",
+      "type": "cargo",
+      "command": "clippy",
+      "args": ["--all-targets", "--", "-D", "warnings"],
+      "problemMatcher": ["$rustc"]
+    },
+    {
+      "label": "build release",
+      "type": "cargo",
+      "command": "build",
+      "args": ["--release"],
+      "problemMatcher": ["$rustc"],
+      "group": { "kind": "build", "isDefault": true }
+    },
+    {
+      "label": "run CLI over PngSuite",
+      "type": "shell",
+      "command": "cargo run --release -- tests/pngsuite",
+      "problemMatcher": []
+    },
+    {
+      "label": "regenerate reference hashes (needs uv)",
+      "type": "shell",
+      "command": "uv run tools/gen_reference.py",
+      "problemMatcher": []
+    },
+    {
+      "label": "regenerate README figures (needs uv)",
+      "type": "shell",
+      "command": "cargo build --release && uv run tools/make_figures.py",
+      "problemMatcher": []
+    }
+  ]
+}

@@ -1,0 +1,49 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "CLI: the open .png file",
+      "cargo": {
+        "args": ["build", "--bin=paeth", "--package=paeth"],
+        "filter": { "name": "paeth", "kind": "bin" }
+      },
+      "args": ["${file}", "--chunks"],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "CLI: every PngSuite file",
+      "cargo": {
+        "args": ["build", "--bin=paeth", "--package=paeth"],
+        "filter": { "name": "paeth", "kind": "bin" }
+      },
+      "args": ["tests/pngsuite"],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug library unit tests",
+      "cargo": {
+        "args": ["test", "--no-run", "--lib", "--package=paeth"],
+        "filter": { "kind": "lib" }
+      },
+      "args": ["--nocapture"],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug PngSuite conformance test",
+      "cargo": {
+        "args": ["test", "--no-run", "--test=pngsuite", "--package=paeth"],
+        "filter": { "name": "pngsuite", "kind": "test" }
+      },
+      "args": ["--nocapture"],
+      "cwd": "${workspaceFolder}"
+    }
+  ]
+}
