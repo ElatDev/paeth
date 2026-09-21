@@ -496,6 +496,34 @@ fn malformed_ancillary_chunks_are_skipped_with_a_warning() {
 }
 
 #[test]
+fn a_warning_says_which_chunk_and_where() {
+    let png = gray_2x2()
+        .chunk(b"gAMA", &[0, 0])
+        .idat(&GRAY_2X2)
+        .iend()
+        .build();
+    let parsed = Png::parse(&png).unwrap();
+    let [warning] = parsed.warnings() else {
+        panic!("expected one warning, got {:?}", parsed.warnings());
+    };
+    assert_eq!(warning.chunk, ChunkType::gAMA);
+    assert_eq!(warning.offset, 33);
+    assert_eq!(warning.message, "length is 2, expected 4");
+    assert_eq!(
+        warning.to_string(),
+        "gAMA at offset 33 ignored: length is 2, expected 4"
+    );
+}
+
+#[test]
+fn a_still_image_is_not_animated() {
+    let png = gray_2x2().idat(&GRAY_2X2).iend().build();
+    let parsed = Png::parse(&png).unwrap();
+    assert!(!parsed.is_animated());
+    assert_eq!(parsed.metadata().animation, None);
+}
+
+#[test]
 fn gamma_after_plte_is_ignored() {
     let png = indexed(&[0; 6])
         .chunk(b"gAMA", &45455u32.to_be_bytes())

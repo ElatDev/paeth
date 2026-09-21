@@ -251,13 +251,13 @@ under the file, and `Png::warnings()` returns them:
 
 ## Tests
 
-151 tests, no test-only dependencies.
+153 tests, no test-only dependencies.
 
 | Suite | | |
 |---|---|---|
 | unit | 91 | CRC-32 against its published check value; chunk framing (truncation at every byte offset, bad CRCs, oversized lengths); IHDR validation across all 65,536 color-type × bit-depth combinations; the Paeth predictor against an independent formulation for **all 16,777,216 inputs**; filter round-trips for every filter and stride; bit unpacking against bit-string slicing; Adam7 geometry against the spec's 8×8 diagram for every size up to 24×24; rescaling against bit replication |
 | `pngsuite` | 4 | the conformance run above |
-| `malformed` | 41 | hand-built files, each broken in exactly one way |
+| `malformed` | 43 | hand-built files, each broken in exactly one way |
 | `metadata` | 3 | every ancillary chunk reaches `Metadata` with the right value |
 | `cli` | 7 | the binary as a user runs it: reports, chunk listing, PAM output, exit codes |
 | `robustness` | 1 | the mutation soak |
@@ -267,6 +267,39 @@ The interesting ones test against something that was not written alongside the
 code: the predictor against a different formulation of the same rule, the
 unpacker against a string of bits, the pass geometry against the diagram in the
 spec, and the whole decoder against pypng.
+
+### Do the tests catch anything?
+
+Three hand-injected bugs is an anecdote.
+[cargo-mutants](https://mutants.rs) makes it systematic: it rewrites one
+expression at a time in the library — flipping a comparison, deleting a match
+arm, returning a default — rebuilds, and runs the suite to see whether anything
+notices.
+
+```console
+$ cargo mutants
+708 mutants tested in 11m: 516 caught, 6 timeouts, 9 missed, 177 unviable
+```
+
+177 of those do not compile. Of the 531 that do, 522 are caught — six of them
+by hanging the decoder until the timeout, which is its own kind of caught. The
+nine survivors cannot change what comes out:
+
+| Survivors | Why they are invisible |
+|---|---|
+| 4 in `inflate.rs` | change only how many bytes the output buffer reserves |
+| 2 in `inflate.rs` | reach the same "image data is too short" error one loop iteration earlier |
+| 2 comparisons in `chunk.rs` | differ only on a case the next line already rejects the same way |
+| 1 comparison in `adam7.rs` | `size > start` against `>=`: where they differ, the expression is zero either way |
+
+The first run was less flattering. It found that nothing checked whether
+ancillary chunks reached `Metadata` at all — deleting the entire match arm for
+`cHRM`, `pHYs`, `sPLT` or eleven others broke no test — that `Image::pixel`'s
+index arithmetic was untested, and that several `Display` implementations could
+have printed nothing at all. Closing those gaps is
+the second commit in this repo, and it took the suite
+from 121 tests to 153. The CLI is left out of the run; see
+[`.cargo/mutants.toml`](.cargo/mutants.toml).
 
 ## How it works
 
@@ -299,7 +332,7 @@ Four things account for most decoder bugs, and each has its own tests:
 ## Reproducing everything
 
 ```console
-$ cargo test                                    # 151 tests
+$ cargo test                                    # 153 tests
 $ uv run tools/gen_reference.py                 # regenerate the reference hashes (pypng + Pillow)
 $ cargo build --release
 $ uv run tools/make_figures.py                  # redraw the figures above
