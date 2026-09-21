@@ -21,6 +21,12 @@ the hard paths in one file. Left, decoded by Pillow; right, by paeth. paeth's
 by [`tools/make_figures.py`](tools/make_figures.py), which fails if a single
 sample differs.*
 
+**Why it exists:** I wanted to learn Rust on something where correctness is
+measurable instead of asserted. PNG is small enough to implement completely —
+signature, chunks, one zlib stream, five filters, seven interlace passes — and
+PngSuite exists specifically to break decoders, so "it works" comes out as a
+number rather than a claim.
+
 ## The claim
 
 > **Decodes all 162 valid images in PngSuite pixel-for-pixel identically to an
@@ -63,6 +69,15 @@ disagreement.
 accident. Each corrupt file is asserted against the specific error PngSuite
 says it contains — a bad IHDR checksum has to fail as an IHDR CRC error, not
 as something else downstream.
+
+**And on files nobody designed as a test.** Every PNG on the machine I wrote
+this on — 3,000 of them: screenshots, game assets, AI renders, icons, sprites
+out of `node_modules` — decodes byte-identical to Pillow's RGBA output. One
+file was rejected: a WebP image with a `.png` extension, which Pillow decodes
+anyway because it sniffs the format instead of trusting the signature. That
+corpus is local, so it is not a number you can reproduce, but the script that
+produced it is [`tools/compare_corpus.py`](tools/compare_corpus.py) and it
+points at any directory you like.
 
 **The test has teeth.** Three deliberate bugs, each a one-line change, and
 what the conformance test did:
@@ -208,9 +223,8 @@ Errors — the file is rejected:
 - a filter type above 4, or a pixel indexing past the end of the palette
 
 Warnings — the chunk is skipped and the image still decodes, which is what the
-spec asks of ancillary chunks:
-
-The CLI prints them under the file, and `Png::warnings()` returns them:
+spec asks of a decoder that meets a broken ancillary chunk. The CLI prints them
+under the file, and `Png::warnings()` returns them:
 
 ```text
   warning      gAMA at offset 33 ignored: length is 2, expected 4
@@ -237,13 +251,14 @@ The CLI prints them under the file, and `Png::warnings()` returns them:
 
 ## Tests
 
-141 tests, no test-only dependencies.
+151 tests, no test-only dependencies.
 
 | Suite | | |
 |---|---|---|
-| unit | 88 | CRC-32 against its published check value; chunk framing (truncation at every byte offset, bad CRCs, oversized lengths); IHDR validation across all 65,536 color-type × bit-depth combinations; the Paeth predictor against an independent formulation for **all 16,777,216 inputs**; filter round-trips for every filter and stride; bit unpacking against bit-string slicing; Adam7 geometry against the spec's 8×8 diagram for every size up to 24×24; rescaling against bit replication |
+| unit | 91 | CRC-32 against its published check value; chunk framing (truncation at every byte offset, bad CRCs, oversized lengths); IHDR validation across all 65,536 color-type × bit-depth combinations; the Paeth predictor against an independent formulation for **all 16,777,216 inputs**; filter round-trips for every filter and stride; bit unpacking against bit-string slicing; Adam7 geometry against the spec's 8×8 diagram for every size up to 24×24; rescaling against bit replication |
 | `pngsuite` | 4 | the conformance run above |
-| `malformed` | 37 | hand-built files, each broken in exactly one way |
+| `malformed` | 41 | hand-built files, each broken in exactly one way |
+| `metadata` | 3 | every ancillary chunk reaches `Metadata` with the right value |
 | `cli` | 7 | the binary as a user runs it: reports, chunk listing, PAM output, exit codes |
 | `robustness` | 1 | the mutation soak |
 | binary unit + doc tests | 4 | |
@@ -284,14 +299,17 @@ Four things account for most decoder bugs, and each has its own tests:
 ## Reproducing everything
 
 ```console
-$ cargo test                                 # 121 tests
-$ uv run tools/gen_reference.py              # regenerate the reference hashes (pypng + Pillow)
-$ cargo build --release && uv run tools/make_figures.py   # redraw the figures above
+$ cargo test                                    # 151 tests
+$ uv run tools/gen_reference.py                 # regenerate the reference hashes (pypng + Pillow)
+$ cargo build --release
+$ uv run tools/make_figures.py                  # redraw the figures above
+$ uv run tools/compare_corpus.py ~/Pictures     # check paeth against Pillow on your own files
+$ cargo mutants                                 # inject bugs and see whether the tests notice
 ```
 
-The two Python scripts pin their own dependencies inline and run under
+The Python scripts pin their own dependencies inline and run under
 [uv](https://docs.astral.sh/uv/) with no setup. Nothing in `cargo test` needs
-Python.
+Python, and none of the scripts send anything anywhere.
 
 ## Dependencies
 

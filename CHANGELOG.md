@@ -17,3 +17,6 @@ First release.
 - Conformance: all 162 valid PngSuite images decode identically to pypng, all
   14 corrupt ones are rejected for the documented reason.
 - Robustness: 1,584,000 mutated files decoded without a panic.
+- 151 tests, and the tooling to reproduce every claim: reference hashes from
+  pypng, README figures drawn from the CLI's own output, a corpus comparison
+  against Pillow, and mutation testing over the library.
