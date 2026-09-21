@@ -289,3 +289,127 @@ impl fmt::Display for LineEndingConversion {
 }
 
 impl std::error::Error for Error {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn messages_name_the_problem_and_where_it_is() {
+        let cases: [(Error, &str); 8] = [
+            (
+                Error::Signature(SignatureError::HighBitStripped),
+                "bad PNG signature: first byte is 0x09, not 0x89: the file passed through a 7-bit channel",
+            ),
+            (
+                Error::Signature(SignatureError::LineEndingsConverted(
+                    LineEndingConversion::CrLfToLf,
+                )),
+                "bad PNG signature: line endings were converted (CR LF to LF): the file was transferred as text",
+            ),
+            (
+                Error::Truncated { offset: 91 },
+                "file ends partway through the chunk at offset 91",
+            ),
+            (
+                Error::CrcMismatch {
+                    chunk: ChunkType::IHDR,
+                    offset: 8,
+                    stored: 0x4353_554D,
+                    computed: 0x5611_2528,
+                },
+                "IHDR chunk at offset 8 fails its CRC (stored 4353554d, computed 56112528)",
+            ),
+            (
+                Error::InvalidBitDepth {
+                    color_type: ColorType::Rgb,
+                    bit_depth: 3,
+                },
+                "bit depth 3 is not allowed for RGB (allowed: [8, 16])",
+            ),
+            (
+                Error::PaletteTooLarge {
+                    entries: 3,
+                    bit_depth: 1,
+                },
+                "palette has 3 entries but a 1-bit index can only reach 2",
+            ),
+            (
+                Error::ImageDataTooShort {
+                    expected: 79,
+                    actual: 78,
+                },
+                "image data is too short: the scanlines need 79 bytes, the stream holds 78",
+            ),
+            (
+                Error::InvalidFilterType { filter: 5, row: 12 },
+                "scanline 12 has invalid filter type 5",
+            ),
+        ];
+        for (error, expected) in cases {
+            assert_eq!(error.to_string(), expected);
+        }
+    }
+
+    #[test]
+    fn every_variant_says_something() {
+        // Display must never come back empty, whatever the variant.
+        let errors = [
+            Error::Signature(SignatureError::TooShort),
+            Error::Signature(SignatureError::Mismatch),
+            Error::ChunkTooLong {
+                offset: 8,
+                length: 0x8000_0000,
+            },
+            Error::InvalidChunkType {
+                offset: 8,
+                bytes: *b"IH1R",
+            },
+            Error::FirstChunkNotIhdr(ChunkType::gAMA),
+            Error::DuplicateChunk(ChunkType::PLTE),
+            Error::MisplacedChunk {
+                chunk: ChunkType::IDAT,
+                rule: "IDAT chunks must be consecutive",
+            },
+            Error::MissingChunk(ChunkType::IEND),
+            Error::UnknownCriticalChunk(ChunkType(*b"CRIT")),
+            Error::BadChunkLength {
+                chunk: ChunkType::IEND,
+                length: 1,
+            },
+            Error::InvalidDimensions {
+                width: 0,
+                height: 1,
+            },
+            Error::InvalidColorType(9),
+            Error::InvalidCompressionMethod(1),
+            Error::InvalidFilterMethod(1),
+            Error::InvalidInterlaceMethod(2),
+            Error::UnexpectedPalette(ColorType::Grayscale),
+            Error::CorruptImageData("invalid stored block lengths".into()),
+            Error::ImageDataTooLong { expected: 6 },
+            Error::TrailingImageData { bytes: 4 },
+            Error::PaletteIndexOutOfRange {
+                index: 1,
+                palette_len: 1,
+            },
+            Error::LimitExceeded {
+                pixels: 1_000_000,
+                limit: 999_999,
+            },
+        ];
+        for error in errors {
+            let text = error.to_string();
+            assert!(text.len() > 10, "{error:?} printed as {text:?}");
+            assert!(!text.ends_with('.'), "{text:?}");
+        }
+        for conversion in [
+            LineEndingConversion::CrLfToLf,
+            LineEndingConversion::LfToCrLf,
+            LineEndingConversion::CrToLf,
+            LineEndingConversion::LfToCr,
+        ] {
+            assert!(conversion.to_string().contains("to"));
+        }
+    }
+}

@@ -522,3 +522,134 @@ fn srgb_and_iccp_together() {
     assert!(parsed.metadata().icc_profile.is_none());
     assert_eq!(parsed.warnings().len(), 1);
 }
+
+#[test]
+fn a_flood_of_broken_ancillary_chunks_is_bounded() {
+    // 20,000 duplicate gAMA chunks and 20,000 unknown ones. Checking
+    // duplicates against every chunk seen so far would make this
+    // quadratic, and keeping a warning for each would grow a string per
+    // chunk, so both are bounded instead.
+    let mut png = gray_2x2();
+    for _ in 0..20_000 {
+        png = png
+            .chunk(b"gAMA", &45455u32.to_be_bytes())
+            .chunk(b"unKn", &[0; 4]);
+    }
+    let png = png.idat(&GRAY_2X2).iend().build();
+    let start = std::time::Instant::now();
+    let parsed = Png::parse(&png).unwrap();
+    let elapsed = start.elapsed();
+
+    assert_eq!(parsed.chunks().len(), 40_003);
+    assert_eq!(parsed.metadata().gamma, Some(45455));
+    assert_eq!(parsed.warnings().len(), 64);
+    // The ones that are kept say what was actually wrong; only the last
+    // stands in for the rest.
+    assert_eq!(
+        parsed.warnings()[0].message,
+        "duplicate; only the first one counts"
+    );
+    assert_eq!(parsed.warnings()[62].message, parsed.warnings()[0].message);
+    assert_eq!(
+        parsed.warnings()[63].message,
+        "further warnings are not reported"
+    );
+    assert!(parsed.decode().is_ok());
+    // Generous, but a quadratic scan over 40,000 chunks takes far longer.
+    assert!(elapsed.as_secs() < 5, "parsing took {elapsed:?}");
+}
+
+#[test]
+fn iccp_after_srgb_and_srgb_after_iccp_are_both_refused() {
+    let mut iccp = b"profile\0\0".to_vec();
+    iccp.extend(zlib(b"not really a profile"));
+    // The other order from srgb_and_iccp_together: iCCP first.
+    let png = gray_2x2()
+        .chunk(b"iCCP", &iccp)
+        .chunk(b"sRGB", &[0])
+        .idat(&GRAY_2X2)
+        .iend()
+        .build();
+    let parsed = Png::parse(&png).unwrap();
+    assert!(parsed.metadata().icc_profile.is_some());
+    assert_eq!(parsed.metadata().srgb, None);
+    assert_eq!(parsed.warnings().len(), 1);
+    assert_eq!(parsed.warnings()[0].chunk, ChunkType::sRGB);
+}
+
+#[test]
+fn transparency_for_every_palette_entry_is_allowed() {
+    // tRNS may carry up to one alpha value per palette entry, and
+    // exactly as many is the interesting boundary.
+    let png = PngBuilder::new()
+        .ihdr(2, 1, 8, 3, 0)
+        .chunk(b"PLTE", &[1, 1, 1, 2, 2, 2])
+        .chunk(b"tRNS", &[10, 20])
+        .idat(&INDEXED_ROW)
+        .iend()
+        .build();
+    let parsed = Png::parse(&png).unwrap();
+    assert_eq!(parsed.warnings(), []);
+    assert_eq!(parsed.decode().unwrap().pixels, [1, 1, 1, 10, 2, 2, 2, 20]);
+
+    // One more than the palette holds is not.
+    let png = PngBuilder::new()
+        .ihdr(2, 1, 8, 3, 0)
+        .chunk(b"PLTE", &[1, 1, 1, 2, 2, 2])
+        .chunk(b"tRNS", &[10, 20, 30])
+        .idat(&INDEXED_ROW)
+        .iend()
+        .build();
+    let parsed = Png::parse(&png).unwrap();
+    assert_eq!(parsed.warnings().len(), 1);
+    assert_eq!(parsed.metadata().transparency, None);
+}
+
+#[test]
+fn significant_bits_may_equal_the_bit_depth() {
+    let png = gray_2x2()
+        .chunk(b"sBIT", &[8])
+        .idat(&GRAY_2X2)
+        .iend()
+        .build();
+    let parsed = Png::parse(&png).unwrap();
+    assert_eq!(parsed.warnings(), []);
+    assert_eq!(
+        parsed.metadata().significant_bits.as_deref(),
+        Some(&[8][..])
+    );
+
+    // One bit more than the samples hold is meaningless.
+    let png = gray_2x2()
+        .chunk(b"sBIT", &[9])
+        .idat(&GRAY_2X2)
+        .iend()
+        .build();
+    assert_eq!(Png::parse(&png).unwrap().warnings().len(), 1);
+}
+
+#[test]
+fn a_bad_filter_in_a_later_pass_reports_the_right_scanline() {
+    // 8x8 interlaced 8-bit gray. Each pass is (rows, bytes per row):
+    let passes = [(1, 1), (1, 1), (1, 2), (2, 2), (2, 4), (4, 4), (4, 8)];
+    let mut scanlines = Vec::new();
+    let mut pass7_filter_byte = 0;
+    for (pass, (rows, row_bytes)) in passes.iter().enumerate() {
+        if pass == 6 {
+            pass7_filter_byte = scanlines.len();
+        }
+        scanlines.resize(scanlines.len() + rows * (1 + row_bytes), 0);
+    }
+    assert_eq!(scanlines.len(), 15 + 64);
+    // Passes 1 to 6 hold 11 scanlines, so pass 7 starts at number 11.
+    scanlines[pass7_filter_byte] = 9;
+    let png = PngBuilder::new()
+        .ihdr(8, 8, 8, 0, 1)
+        .idat(&scanlines)
+        .iend()
+        .build();
+    assert_eq!(
+        paeth::decode(&png),
+        Err(Error::InvalidFilterType { filter: 9, row: 11 })
+    );
+}

@@ -237,15 +237,16 @@ The CLI prints them under the file, and `Png::warnings()` returns them:
 
 ## Tests
 
-121 tests, no test-only dependencies.
+141 tests, no test-only dependencies.
 
 | Suite | | |
 |---|---|---|
-| unit | 76 | CRC-32 against its published check value; chunk framing (truncation at every byte offset, bad CRCs, oversized lengths); IHDR validation across all 65,536 color-type × bit-depth combinations; the Paeth predictor against an independent formulation for **all 16,777,216 inputs**; filter round-trips for every filter and stride; bit unpacking against bit-string slicing; Adam7 geometry against the spec's 8×8 diagram for every size up to 24×24; rescaling against bit replication |
+| unit | 88 | CRC-32 against its published check value; chunk framing (truncation at every byte offset, bad CRCs, oversized lengths); IHDR validation across all 65,536 color-type × bit-depth combinations; the Paeth predictor against an independent formulation for **all 16,777,216 inputs**; filter round-trips for every filter and stride; bit unpacking against bit-string slicing; Adam7 geometry against the spec's 8×8 diagram for every size up to 24×24; rescaling against bit replication |
 | `pngsuite` | 4 | the conformance run above |
-| `malformed` | 36 | hand-built files, each broken in exactly one way |
+| `malformed` | 37 | hand-built files, each broken in exactly one way |
+| `cli` | 7 | the binary as a user runs it: reports, chunk listing, PAM output, exit codes |
 | `robustness` | 1 | the mutation soak |
-| CLI + doc tests | 4 | |
+| binary unit + doc tests | 4 | |
 
 The interesting ones test against something that was not written alongside the
 code: the predictor against a different formulation of the same rule, the

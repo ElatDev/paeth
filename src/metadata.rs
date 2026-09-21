@@ -698,6 +698,38 @@ mod tests {
     }
 
     #[test]
+    fn decompression_up_to_the_limit_is_allowed() {
+        let h = header(ColorType::Rgb, 8);
+        let mut z = b"Big  ".to_vec();
+        z.extend(zlib(&vec![b'a'; 1024]));
+        assert_eq!(parse_ztxt(&z, &cx(&h, None)).unwrap().text.len(), 1024);
+    }
+
+    #[test]
+    fn chunk_flags_and_methods_are_checked() {
+        let h = header(ColorType::Rgb, 8);
+        // zTXt and iCCP define compression method 0 only.
+        let mut bad_method = b"k ".to_vec();
+        bad_method.extend(zlib(b"text"));
+        assert!(parse_ztxt(&bad_method, &cx(&h, None)).is_err());
+        let mut iccp = b"profile ".to_vec();
+        iccp.extend(zlib(b"profile bytes"));
+        assert!(parse_iccp(&iccp, &cx(&h, None)).is_err());
+        let mut good = b"profile  ".to_vec();
+        good.extend(zlib(b"profile bytes"));
+        assert_eq!(parse_iccp(&good, &cx(&h, None)).unwrap().name, "profile");
+
+        // PNG requires cICP matrix coefficients of 0 (identity/RGB).
+        assert!(parse_cicp(&[9, 16, 1, 1]).is_err());
+        assert!(parse_cicp(&[9, 16, 0, 2]).is_err(), "range flag is 0 or 1");
+        assert!(parse_cicp(&[9, 16, 0, 0]).is_ok());
+
+        // An animation with no frames is not an animation.
+        assert!(parse_actl(&[0, 0, 0, 0, 0, 0, 0, 0]).is_err());
+        assert_eq!(parse_actl(&[0, 0, 0, 1, 0, 0, 0, 7]).unwrap().plays, 7);
+    }
+
+    #[test]
     fn corrupt_compressed_text_is_an_error_not_a_panic() {
         let h = header(ColorType::Rgb, 8);
         assert!(parse_ztxt(b"k\0\0\x78\x9c\xff\xff", &cx(&h, None)).is_err());

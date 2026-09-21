@@ -359,6 +359,18 @@ mod tests {
     }
 
     #[test]
+    fn short_input_is_only_too_short_when_it_is_a_prefix() {
+        // Five bytes of the signature: cut off.
+        assert_eq!(
+            diagnose_signature(&SIGNATURE[..5]),
+            SignatureError::TooShort
+        );
+        // Five bytes of something else: not a PNG at all.
+        assert_eq!(diagnose_signature(b"hello"), SignatureError::Mismatch);
+        assert_eq!(diagnose_signature(b""), SignatureError::TooShort);
+    }
+
+    #[test]
     fn a_jpeg_is_just_a_mismatch() {
         let jpeg = [0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, b'J', b'F', b'I', b'F'];
         assert_eq!(diagnose_signature(&jpeg), SignatureError::Mismatch);
@@ -464,6 +476,16 @@ mod tests {
     #[test]
     fn nothing_after_the_signature_is_an_empty_stream() {
         assert_eq!(collect(&SIGNATURE).unwrap(), []);
+    }
+
+    #[test]
+    fn chunk_types_print_as_their_four_letters() {
+        assert_eq!(ChunkType::IHDR.to_string(), "IHDR");
+        assert_eq!(ChunkType::tEXt.to_string(), "tEXt");
+        assert_eq!(format!("{:?}", ChunkType::IEND), "ChunkType(\"IEND\")");
+        // Types are validated before this point, but Display must not
+        // panic or vanish if one is not printable.
+        assert_eq!(ChunkType([0x89, b'P', b'N', b'G']).to_string(), r"\x89PNG");
     }
 
     #[test]

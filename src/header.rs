@@ -289,6 +289,53 @@ mod tests {
     }
 
     #[test]
+    fn dimensions_are_checked_in_both_directions() {
+        for (w, h) in [
+            (0, 1),
+            (1, 0),
+            (0, 0),
+            (MAX_DIMENSION + 1, 1),
+            (1, MAX_DIMENSION + 1),
+        ] {
+            assert_eq!(
+                Header::parse(&ihdr(w, h, 8, 0, 0)),
+                Err(Error::InvalidDimensions {
+                    width: w,
+                    height: h
+                }),
+                "{w}x{h}"
+            );
+        }
+        // The largest size the spec allows is still valid.
+        let max = Header::parse(&ihdr(MAX_DIMENSION, MAX_DIMENSION, 8, 0, 0)).unwrap();
+        assert_eq!(
+            max.pixel_count(),
+            u64::from(MAX_DIMENSION) * u64::from(MAX_DIMENSION)
+        );
+    }
+
+    #[test]
+    fn color_type_accessors() {
+        let cases = [
+            (ColorType::Grayscale, 0, 1, false, "grayscale"),
+            (ColorType::Rgb, 2, 3, false, "RGB"),
+            (ColorType::Indexed, 3, 1, false, "indexed"),
+            (ColorType::GrayscaleAlpha, 4, 2, true, "grayscale+alpha"),
+            (ColorType::Rgba, 6, 4, true, "RGBA"),
+        ];
+        for (color_type, code, channels, alpha, name) in cases {
+            assert_eq!(color_type.code(), code);
+            assert_eq!(ColorType::from_code(code), Some(color_type));
+            assert_eq!(color_type.channels(), channels);
+            assert_eq!(color_type.has_alpha(), alpha);
+            assert_eq!(color_type.to_string(), name);
+        }
+        for undefined in [1, 5, 7, 8, 255] {
+            assert_eq!(ColorType::from_code(undefined), None);
+        }
+    }
+
+    #[test]
     fn wrong_length() {
         for len in [0, 12, 14] {
             assert_eq!(

@@ -65,6 +65,10 @@ pub struct Png<'a> {
     palette: Option<Vec<[u8; 3]>>,
     metadata: Metadata,
     chunks: Vec<Chunk<'a>>,
+    /// The chunks from [`SINGLE`] seen so far. Bounded by its length, so
+    /// a file with thousands of ancillary chunks still parses in linear
+    /// time.
+    seen: Vec<ChunkType>,
     warnings: Vec<Warning>,
     trailing_bytes: usize,
     limits: Limits,
@@ -100,15 +104,30 @@ const BEFORE_IDAT: [ChunkType; 7] = [
     ChunkType::acTL,
 ];
 
-/// Chunks that may appear more than once.
-const REPEATABLE: [ChunkType; 6] = [
-    ChunkType::tEXt,
-    ChunkType::zTXt,
-    ChunkType::iTXt,
-    ChunkType::sPLT,
-    ChunkType::fcTL,
-    ChunkType::fdAT,
+/// The ancillary chunks this decoder reads that may appear only once.
+/// Everything else it reads (`tEXt`, `zTXt`, `iTXt`, `sPLT`) may repeat.
+const SINGLE: [ChunkType; 15] = [
+    ChunkType::tRNS,
+    ChunkType::gAMA,
+    ChunkType::cHRM,
+    ChunkType::sRGB,
+    ChunkType::iCCP,
+    ChunkType::cICP,
+    ChunkType::mDCV,
+    ChunkType::cLLI,
+    ChunkType::sBIT,
+    ChunkType::bKGD,
+    ChunkType::hIST,
+    ChunkType::pHYs,
+    ChunkType::tIME,
+    ChunkType::eXIf,
+    ChunkType::acTL,
 ];
+
+/// How many warnings are kept. A file can carry an unbounded number of
+/// broken ancillary chunks, and the decoder should not grow a string for
+/// each one.
+const MAX_WARNINGS: usize = 64;
 
 impl<'a> Png<'a> {
     /// Parses a PNG file with the default [`Limits`].
@@ -146,6 +165,7 @@ impl<'a> Png<'a> {
             palette: None,
             metadata: Metadata::default(),
             chunks: vec![first],
+            seen: Vec::new(),
             warnings: Vec::new(),
             trailing_bytes: 0,
             limits,
@@ -246,8 +266,11 @@ impl<'a> Png<'a> {
         if let Some(rule) = placement {
             return self.warn(chunk, rule.to_string());
         }
-        if !REPEATABLE.contains(&kind) && self.chunks.iter().any(|c| c.kind == kind) {
-            return self.warn(chunk, "duplicate; only the first one counts".to_string());
+        if SINGLE.contains(&kind) {
+            if self.seen.contains(&kind) {
+                return self.warn(chunk, "duplicate; only the first one counts".to_string());
+            }
+            self.seen.push(kind);
         }
         let cx = Context {
             header: &self.header,
@@ -296,6 +319,11 @@ impl<'a> Png<'a> {
     }
 
     fn warn(&mut self, chunk: &Chunk<'_>, message: String) {
+        let message = match self.warnings.len() {
+            n if n >= MAX_WARNINGS => return,
+            n if n == MAX_WARNINGS - 1 => "further warnings are not reported".to_string(),
+            _ => message,
+        };
         self.warnings.push(Warning {
             chunk: chunk.kind,
             offset: chunk.offset,
@@ -324,7 +352,8 @@ impl<'a> Png<'a> {
         &self.chunks
     }
 
-    /// Problems in ancillary chunks that were skipped.
+    /// Problems in ancillary chunks that were skipped. At most 64 are
+    /// kept; the last one then says so.
     pub fn warnings(&self) -> &[Warning] {
         &self.warnings
     }

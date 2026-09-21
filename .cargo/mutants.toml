@@ -1,0 +1,6 @@
+# cargo-mutants: inject small bugs into the library and check the tests
+# notice. The CLI is excluded; its output formatting is not what the test
+# suite is for.
+exclude_globs = ["src/main.rs"]
+timeout_multiplier = 5.0
+minimum_test_timeout = 60
