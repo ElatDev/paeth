@@ -58,6 +58,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.1.0
       - run: uv run tools/gen_reference.py
       - run: git diff --exit-code tests/pngsuite/reference.tsv
